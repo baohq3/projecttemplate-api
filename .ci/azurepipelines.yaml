@@ -1,0 +1,26 @@
+trigger:
+  branches:
+    include:
+    - main
+    - azuredevops
+    - feature/*
+    - bug/*
+
+# Pool build
+pool:
+  vmImage: 'ubuntu-latest'
+
+resources:
+  repositories:
+  - repository: devops
+    endpoint: Application
+    type: github
+    name: LocTaRND/azure-devops-ci-cd
+    ref: azuredevops
+
+variables:
+  - group: demo_var
+  - group: bookstore
+
+stages:
+  - template: templates/dotnet/build.yml@devops
