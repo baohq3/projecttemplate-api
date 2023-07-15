@@ -15,7 +15,7 @@ resources:
   - repository: devops
     endpoint: Application
     type: github
-    name: LocTaRND/azure-devops-ci-cd
+    name: LocTaRND/azure-devops-template
     ref: azuredevops
 
 variables:
