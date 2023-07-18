@@ -20,9 +20,7 @@ resources:
 
 variables:
   - group: demo_var
-  # - group: bookstore
-  - name: projectname
-    value: projecttemplate-api
+  - group: be
 
 stages:
   - template: templates/dotnet/build.yml@devops
