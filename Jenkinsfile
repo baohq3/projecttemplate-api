@@ -4,7 +4,7 @@
 // Version: v1.x
 //========================================================================
 @Library('devops-jenkins-ci@training') _
-demoPipeline script: this
+dotnetPipeline script: this
 //========================================================================
 // DO NOT MODIFY AFTER THESE LINES.
 //========================================================================
