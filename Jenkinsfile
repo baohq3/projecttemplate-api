@@ -3,7 +3,7 @@
 // Demo CI
 // Version: v1.x
 //========================================================================
-@Library('devops-jenkins-ci@training') _
+@Library('jenkins-devops-ci@pisharped') _
 dotnetPipeline script: this
 //========================================================================
 // DO NOT MODIFY AFTER THESE LINES.
