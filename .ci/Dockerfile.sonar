@@ -1,0 +1,19 @@
+ARG BASEIMG
+ARG IMG_VERSION
+FROM $BASEIMG:$IMG_VERSION
+COPY . .
+ARG SONAR_TOKEN
+ARG SONAR_URL
+ARG SONAR_PROJECT
+
+RUN dotnet sonarscanner begin \
+  /k:"$SONAR_PROJECT" \
+  /d:sonar.login="$SONAR_TOKEN" \ 
+  /d:sonar.host.url="$SONAR_URL" \
+  /d:sonar.coverageReportPaths="./sonarqubecoverage/SonarQube.xml" \
+  /d:sonar.qualitygate.wait=true \
+  /d:sonar.qualitygate.timeout=900 \
+&& dotnet build . \
+&& dotnet test --no-build --collect:'XPlat Code Coverage' --results-directory ./results \
+&& reportgenerator "-reports:./results/*/coverage.cobertura.xml" "-targetdir:ProjectTemplate/sonarqubecoverage" "-reporttypes:SonarQube" \
+&& dotnet sonarscanner end /d:sonar.login="$SONAR_TOKEN"

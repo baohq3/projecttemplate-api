@@ -9,4 +9,3 @@ docker-compose.*.yml
 */bin
 */obj
 */node_modules
-results

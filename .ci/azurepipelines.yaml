@@ -3,6 +3,7 @@ trigger:
     include:
     - main
     - develop
+    - azuredevops
     - feature/*
     - bug/*
 
@@ -16,17 +17,236 @@ pr:
 pool:
   vmImage: 'ubuntu-latest'
 
-resources:
-  repositories:
-  - repository: devops
-    endpoint: Application
-    type: github
-    name: LocTaRND/azure-devops-template
-    ref: azuredevops
-
 variables:
   - group: demo_var
   - group: be
 
 stages:
-  - template: templates/dotnet/build.yml@devops
+- stage: ScanSecrets
+  jobs:
+    - job: scansecrets
+      steps:
+      - checkout: self
+      
+      - task: trivy@1
+        displayName: Scan Source Code
+        inputs:
+          version: 'latest'
+          path: '.'
+          severities: 'CRITICAL,HIGH'
+          ignoreUnfixed: true
+          options: '--skip-dirs ./.ci'
+          exitCode: '0'
+
+- stage: Build
+  dependsOn: ScanSecrets
+  jobs:
+    - job: build           
+      steps:
+      - checkout: self
+               
+      - task: replacetokens@5
+        inputs:
+          rootDirectory: '$(Build.SourcesDirectory)/ProjectTemplate'
+          targetFiles: '**/*.azure.json'
+          encoding: 'auto'
+          tokenPattern: 'default'
+          writeBOM: true
+          actionOnMissing: 'warn'
+          keepToken: false
+          actionOnNoFiles: 'continue'
+          enableTransforms: false
+          useLegacyPattern: false
+          enableTelemetry: true
+        displayName: 'Replace variables'
+
+      - script: |
+          mv $(csproject)/appsettings.azure.json $(csproject)/appsettings.json
+        displayName: 'Replace appsetting'
+
+      - task: SonarCloudPrepare@2
+        inputs:
+          SonarCloud: 'sonarcloud'
+          organization: 'loctad'
+          scannerMode: 'MSBuild'
+          projectKey: 'loctad_projecttemplate-api'
+          projectName: 'projecttemplate-api'
+          extraProperties: 'sonar.qualitygate.wait=$(sonarqualitygatewait)'
+      - task: DotNetCoreCLI@2
+        displayName: Build solution
+        inputs:
+          command: 'build'
+          arguments: '.'
+
+      # Publish it as .NET 6
+      - task: DotNetCoreCLI@2
+        displayName: Publish solution
+        inputs:
+          command: publish
+          publishWebProjects: false
+          projects: '$(csproject)/*.csproj'
+          arguments: '--no-build --no-restore --output $(Build.ArtifactStagingDirectory)/app'
+          zipAfterPublish: false
+          modifyOutputPath: false
+
+      - script: |
+          echo "ArtifactStaging: $(Build.ArtifactStagingDirectory)"
+        displayName: Verify
+      - task: DotNetCoreCLI@2
+        displayName: Run Unit Test
+        inputs:
+          command: 'test'
+          projects: '**/*Test/*.csproj'
+          arguments: '--no-build --no-restore --collect "XPlat Code Coverage"'
+          testRunTitle: 'Unit Test'
+
+      - task: reportgenerator@5
+        displayName: 'Merge code coverage reports'
+        inputs:
+          reports: '$(Agent.TempDirectory)/**/*.xml'
+          targetdir: '$(Agent.TempDirectory)/coverage'
+          reporttypes: 'Cobertura;HTMLInline;HTMLChart'
+          verbosity: 'Verbose'
+
+      # Publish Test & Code Coverage Results
+      - task: PublishTestResults@2
+        inputs:
+          testResultsFormat: 'VSTest'
+          testResultsFiles: '**/*.trx'
+          searchFolder: '$(Agent.TempDirectory)'
+
+      - task: PublishCodeCoverageResults@1
+        displayName: "Publish Code Coverage Results"
+        inputs:
+          codeCoverageTool: 'Cobertura'
+          summaryFileLocation: '$(Agent.TempDirectory)/coverage/*.xml'
+          reportDirectory: '$(Agent.TempDirectory)/coverage'
+        env:
+          DISABLE_COVERAGE_AUTOGENERATE: 'true'
+
+      # Sonar Scanner
+      - task: SonarCloudAnalyze@2
+        inputs:
+          jdkversion: 'JAVA_HOME_21_X64'
+
+      - task: SonarCloudPublish@2
+        inputs:
+          pollingTimeoutSec: '300'
+      
+      # Publish Nuget Package
+      - task: PublishPipelineArtifact@1
+        displayName: 'Publish Package'
+        inputs:
+          targetPath:  '$(Build.ArtifactStagingDirectory)/app'
+          artifactName: 'app-$(Build.BuildId)'
+
+- stage: BuildPushImage
+  dependsOn: Build
+  jobs:
+    - job: buildpushimage           
+      steps:
+      - checkout: self
+
+      - task: DownloadPipelineArtifact@2
+        displayName: 'Download Package'
+        inputs:
+          artifact: 'app-$(Build.BuildId)'
+          path: '$(Build.SourcesDirectory)/app'
+
+      - task: Docker@2
+        displayName: Login to ACR
+        inputs:
+          containerRegistry: 'registry'
+          command: 'login'
+
+      - task: Docker@2
+        displayName: Build Docker Image
+        inputs:
+          containerRegistry: 'registry'
+          repository: taloc/$(Build.Repository.Name)
+          command: build
+          Dockerfile: './.ci/Dockerfile.ci'
+          buildContext: '.'
+          arguments: '--build-arg BASEIMG=mcr.microsoft.com/dotnet/sdk --build-arg IMG_VERSION=6.0 --build-arg ENTRYPOINT=Microsoft.DSX.ProjectTemplate.API'
+          tags: |
+            $(Build.BuildId)
+
+      # Push Images to ACR
+      - task: Docker@2
+        displayName: Push Docker Image
+        inputs:
+          command: push
+          repository: taloc/$(Build.Repository.Name)
+          containerRegistry: 'registry'
+          tags: |
+            $(Build.BuildId)
+
+      # Trivy
+      - task: trivy@1
+        displayName: Scan Source Code
+        inputs:
+          version: 'latest'
+          path: '.'
+          scanners: 'vuln,secret,config'
+          severities: 'CRITICAL,HIGH'
+          ignoreUnfixed: true
+          options: '--secret-config ./.ci/trivy-secret.yaml --skip-dirs ./.ci'
+          exitCode: '0'
+
+      # Trivy
+      - task: trivy@1
+        displayName: Scan Docker Images
+        inputs:
+          version: 'latest'
+          loginDockerConfig: true
+          image: taloc/$(Build.Repository.Name):$(Build.BuildId)
+          severities: 'CRITICAL,HIGH'
+          exitCode: '0'
+
+      - task: replacetokens@4
+        inputs:
+          rootDirectory: '$(Build.SourcesDirectory)/.cd'
+          targetFiles: '**/*.yml'
+          encoding: 'auto'
+          tokenPattern: 'default'
+          writeBOM: true
+          actionOnMissing: 'warn'
+          keepToken: false
+          actionOnNoFiles: 'continue'
+          enableTransforms: false
+          useLegacyPattern: false
+          enableTelemetry: true
+        displayName: 'Replace variables'
+
+      - task: PublishPipelineArtifact@1
+        inputs:
+          artifactName: 'manifests'
+          path: '$(Build.SourcesDirectory)/.cd'
+
+- stage: DeployTest
+  displayName: DeployTest
+  dependsOn: BuildPushImage
+  jobs:
+  - deployment: DeployTest
+    displayName: DeployTest
+    environment: 'test'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: none
+          - task: DownloadPipelineArtifact@2
+            inputs:
+              artifactName: 'manifests'
+              downloadPath: '$(System.ArtifactsDirectory)/manifests'
+              
+          - task: KubernetesManifest@1
+            displayName: Deploy to Kubernetes cluster
+            inputs:
+              action: deploy
+              connectionType: 'kubernetesServiceConnection'
+              kubernetesServiceConnection: 'aks'
+              namespace: demo
+              manifests: |
+                $(System.ArtifactsDirectory)/manifests/deployment.yml
+                $(System.ArtifactsDirectory)/manifests/service.yml
