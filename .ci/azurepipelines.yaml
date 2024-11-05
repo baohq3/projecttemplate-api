@@ -167,7 +167,7 @@ stages:
           command: build
           Dockerfile: './.ci/Dockerfile.ci'
           buildContext: '.'
-          arguments: '--build-arg BASEIMG=mcr.microsoft.com/dotnet/sdk --build-arg IMG_VERSION=6.0 --build-arg ENTRYPOINT=Microsoft.DSX.ProjectTemplate.API'
+          arguments: '--build-arg BASEIMG=mcr.microsoft.com/dotnet/sdk --build-arg IMG_VERSION=6.0 --build-arg ENTRYPOINT=Microsoft.DSX.ProjectTemplate.API.dll'
           tags: |
             $(Build.BuildId)
 

@@ -12,8 +12,4 @@ EXPOSE 8080
 COPY ./app .
 COPY ./.ci/docker_entrypoint.sh .
 
-RUN chmod +x /app/docker_entrypoint.sh \
-    && chmod +x /app \
-    && chmod -R 755 /app
-
-ENTRYPOINT [ "/app/docker_entrypoint.sh" ]
+ENTRYPOINT [ "bash", "/app/docker_entrypoint.sh" ]

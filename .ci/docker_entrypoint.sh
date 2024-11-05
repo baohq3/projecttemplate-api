@@ -1,4 +1,9 @@
 #!/bin/bash
-set -e
-echo "Starting $RUNTIME"
-exec "/app/$RUNTIME"
+
+# -e: exit on error
+# -u: exit on unset variables
+set -eu;
+
+echo "Starting $RUNTIME";
+
+dotnet $RUNTIME;
